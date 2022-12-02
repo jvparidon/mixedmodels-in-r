@@ -2,14 +2,13 @@
 title: "Using MixedModels.jl in R"
 author: "Jeroen van Paridon"
 date: "2022-11-21"
-output: html_document
+output: rmarkdown::github_document
 ---
 
 ```{r setup}
 
 library(JuliaCall)
 library(lme4)
-library(arrow)
 library(tictoc)
 
 ```
