@@ -1,16 +1,12 @@
-Using MixedModels.jl in R
+Using Julia’s MixedModels.jl in R
 ================
-Jeroen van Paridon
-2022-11-21
+JP van Paridon
+2022-12-02
 
 ``` r
 library(JuliaCall)
+library(Matrix)
 library(lme4)
-```
-
-    ## Loading required package: Matrix
-
-``` r
 library(tictoc)
 ```
 
@@ -50,7 +46,7 @@ That said, `MixedModels.jl` is not an experimental package; several
 companies use it commercially, so reliability is important and the
 developers are thoughtful about making changes.
 
-## Why you don’t need to switch to `Julia` to use `MixedModels.jl`
+## Why you don’t need to switch from `R` to `Julia` to use `MixedModels.jl`
 
 Despite the advantages that `Julia` offers, most psychologists are
 probably not moving away from `R` anytime soon. There are simply too
@@ -99,9 +95,6 @@ Now that you have `Julia` installed, all you need to do is install the
 can set up the `Julia` environment.
 
 ``` r
-# require JuliaCall
-require(JuliaCall)
-
 # set up and start the Julia instance
 julia_setup()
 ```
@@ -111,6 +104,11 @@ julia_setup()
     ## Loading setup script for JuliaCall...
 
     ## Finish loading setup script for JuliaCall.
+
+If you do not see similar output when you call `julia_setup()`,
+something might be wrong with your `Julia` install or the binaries may
+not be on your `PATH` variable. If you encounter any problems, please
+refer back to the installation instructions.
 
 ``` r
 # install MixedModels.jl and JelyMe4.jl if necessary
@@ -140,21 +138,22 @@ julia_command("kb07 = DataFrame(MixedModels.dataset(:kb07));")
 kb07 <- julia_eval("kb07")
 ```
 
-## Fitting a big model in R
+## Fitting a big model in `R`
 
 To set a baseline for the time cost of fitting a complex mixed-effects
-model in `lme4`, I’m going to follow [an example from Doug
-Bates](https://rpubs.com/dmbates/377897), one of the lead developers
+model in `lme4`, we’re going to follow [an example from Doug
+Bates](https://rpubs.com/dmbates/377897)[^2], one of the lead developers
 behind both `lme4` and `MixedModels.jl`, and use the `kb07` dataset that
 is included with `MixedModels.jl` for use in tutorials such as this one.
-To get a nice, complex model for my demonstration, I’ll specify the
+To get a nice, complex model for my demonstration, we’ll specify the
 maximal model that’s licensed by the data generating process: All main
 effects, all possible interactions between these main effects, and
 random effects by both item and subject (including random intercepts and
 random slopes for all main effect and interactions between main
-effects).[^2]
+effects).[^3] This model will be singular, but that’s not something we
+need to worry about in this demonstration.
 
-I’ve already loaded the data from the `Julia` session into the `R`
+We’ve already loaded the data from the `Julia` session into the `R`
 session in the block of code above so that we can focus on model fitting
 in the code below, but if you’re working in `R` and offloading model
 fitting to `Julia`, you’ll generally want to work in the opposite
@@ -164,9 +163,9 @@ session. How to do this will be demonstrated later in this vignette.
 ``` r
 tic("lme4 model")
 m <- lmer(rt_trunc ~ 1 + spkr * prec * load +
-              (1 + spkr * prec * load | subj) +
-              (1 + spkr * prec * load | item),
-            kb07, REML=FALSE)
+            (1 + spkr * prec * load | subj) +
+            (1 + spkr * prec * load | item),
+          kb07, REML = FALSE)
 ```
 
     ## boundary (singular) fit: see help('isSingular')
@@ -175,7 +174,7 @@ m <- lmer(rt_trunc ~ 1 + spkr * prec * load +
 toc()
 ```
 
-    ## lme4 model: 112.515 sec elapsed
+    ## lme4 model: 114.557 sec elapsed
 
 ``` r
 summary(m)
@@ -255,16 +254,36 @@ summary(m)
     ## optimizer (nloptwrap) convergence code: 0 (OK)
     ## boundary (singular) fit: see help('isSingular')
 
-This model takes quite a bit of time to fit in `R`, around 120 seconds.
-Two minutes is generally not prohibitive when fitting a single model,
-but imagine this model had even more parameters or a much larger
-dataset, or even worse, you wanted to use bootstrapping to get
-confidence intervals for your parameter estimates and had to refit this
-model 1000 times. Instead of two minutes, you would be looking at closer
-to 2000 minutes of model fitting, more than 30 hours to get CIs for a
-single model![^3]
+This model takes a bit of time to fit in `R`, around two minutes on my
+MacBook. Two minutes is generally not prohibitive when fitting a single
+model, but imagine a model with more parameters still, or fitting a
+model to a much larger dataset. Even worse, imagine you wanted to use
+bootstrapping to get confidence intervals for your parameter estimates
+and wanted to refit this model 1000 times. Instead of two minutes, you
+would be looking at closer to 2000 minutes of model fitting, more than
+30 hours to get CIs for a single model![^4]
 
 ## Fitting the model in Julia
+
+Fitting the same model in `MixedModels.jl` is not overly complicated.
+`Julia` and `MixedModels.jl` syntax differs a bit from `R` and `lme4`,
+but luckily the actual model formula works pretty much exactly the same.
+
+First, we pass the dataset from `R` to the `JuliaCall` session using
+`julia_assign("Julia_variable_name", R_variable_name)`. Then, we
+construct the `MixedModels.jl` model fitting call using
+`julia_command()`. The call is passed as a string, and inside that
+string is built up as follows:
+
+1.  A variable assignment so that we can retrieve the fitted model from
+    the `JuliaCall` session later
+2.  A `fit!()` call that tells `Julia` to fit the specified model
+3.  A `LinearMixedModel()` call, equivalent to `lmer()`
+4.  An `@formula()` call, to specify the model formula using the
+    familiar syntax
+5.  The formula, dataset, and additional but straightforward parameters
+    such as `REML` and `progress` (note that unlike in `R`, boolean
+    values in `Julia` are lowercase: `true` and `false`!)
 
 ``` r
 # the dataframe is already present in the Julia instance
@@ -281,7 +300,7 @@ julia_command("jm = fit!(LinearMixedModel(@formula(
 toc()
 ```
 
-    ## MixedModels.jl model: 14.082 sec elapsed
+    ## MixedModels.jl model: 14.69 sec elapsed
 
 ``` r
 # retrieve the model from Julia
@@ -372,6 +391,13 @@ summary(jm)
     ## optimizer (LN_BOBYQA) convergence code: 5 (fit with MixedModels.jl)
     ## boundary (singular) fit: see help('isSingular')
 
+The fitted model is retrieved from the `JuliaCall` session using
+`julia_eval()`, and thanks to some magic from the `JellyMe4.jl` package,
+it is stored in `R` as an `lme4`-style model object. We can then simply
+summarize it using `summary()`. As you can see, the model yields
+numerically similar results to the one we fitted in `R`, but it took
+only about 15 seconds to fit, a significant speedup!
+
 ## Wrap it in a function
 
 To make calling `MixedModels.jl` from `R` more convenient (and not have
@@ -401,7 +427,7 @@ jm <- jmer(rt_trunc ~ 1 + spkr * prec * load +
 toc()
 ```
 
-    ## jmer model: 6.117 sec elapsed
+    ## jmer model: 7.208 sec elapsed
 
 ``` r
 summary(jm)
@@ -499,6 +525,20 @@ fitting time, and that turns out to be just \~7 seconds in
 bootstrapping to 7000 seconds, or just 2 hours, rather than 30 hours
 when using `lme4`.
 
+If you want to fit your own models in `MixedModels.jl` using
+`JuliaCall`, you can simply:
+
+1.  Copy the block of `JuliaCall` setup code and the `jmer()` function
+    definition
+2.  Assign your dataset from your `R` session to your `JuliaCall`
+    session using `julia_assign()`
+3.  Specify and fit the model using `jmer()` instead of `lmer()`
+4.  Store the returned results in an `R` variable so you can e.g. call
+    `summary()` on it
+
+If you run into any issues, just shoot me an email at
+<vanparidon@wisc.edu>!
+
 [^1]: The main reason that a `Julia` package can be much faster than an
     `R` package is that `R` is *interpreted* whereas `Julia` is
     *compiled*. Broadly speaking, an interpreted language takes the code
@@ -513,12 +553,18 @@ when using `lme4`.
     fitting code hundreds or thousands of times, switching to a compiled
     language like `Julia` comes with a big speed advantage.
 
-[^2]: To quote Doug: “Let me be clear that I do not advocate fitting
-    such models”, I’m just fitting the maximal model as a stand-in for
-    any other complex models that you may want to fit.
+[^2]: Sadly Doug’s original vignette is based on older versions of
+    `Julia`, `R`, and their respective packages, and seems to no longer
+    work with more recent versions.
 
-[^3]: Obviously the scenario I’m presenting here may not apply to you.
-    You may only fit very minimal models, in which case `lme4` probably
+[^3]: To quote Doug: “Let me be clear that I do not advocate fitting
+    such models”, fitting maximal models by default is a somewhat
+    controversial topic; we’re just fitting the maximal model here as a
+    stand-in for any other complex models that you may want to fit, not
+    because it’s necessarily the most appropriate model for the data.
+
+[^4]: Obviously the scenario presented here may not apply to you. You
+    may only fit very minimal models, in which case `lme4` probably
     works just fine for you. Alternatively, 30 hours may not sound like
     a very long time to you, because you regularly fit much more
     complicated models and do a lot of bootstrap resampling! In that
