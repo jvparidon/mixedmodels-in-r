@@ -16,13 +16,13 @@ library(tictoc)
 
 ## Why fit mixed-effects models with `MixedModels.jl` instead of `lme4`?
 
-`lme4` has lots of great qualities: It's free and easy to install, it's fairly straightforward to use if you know R, and its syntax and functionality is stable (i.e. it's no longer undergoing any major changes). That last quality has downsides, too: Because `lme4` is no longer being actively developed, any new work done on it consists of bug fixes rather than major improvements. When all you want to do is fit a reasonably _small, simple_ linear or generalized linear mixed-effects model, that lack of new development is a net positive. However, when you're trying to fit a harder model (e.g. using a very large dataset or maximal model with many parameters) or the same model many times (e.g. when doing some kind of bootstrapping) `lme4` can start to feel very limited. Models may take very long to fit, or you may encounter convergence issues.
+`lme4` has lots of great qualities: It's free and easy to install, it's fairly straightforward to use if you know `R`, and its syntax and functionality is stable (i.e. it's no longer undergoing any major changes). That last quality has downsides, too: Because `lme4` is no longer being actively developed, any new work done on it consists of bug fixes rather than major improvements. When all you want to do is fit a reasonably _small, simple_ linear or generalized linear mixed-effects model, that lack of new development is a net positive. However, when you're trying to fit a harder model (e.g. using a very large dataset or maximal model with many parameters) or the same model many times (e.g. when doing some kind of bootstrapping) `lme4` can start to feel very limited. Models may take very long to fit, or you may encounter convergence issues.
 
 `MixedModels.jl` solves a number of issues with `lme4`. Most of these are not material to psychologists, but one that _does_ matter is that `MixedModels.jl` can fit models much faster than `lme4` because it is written in `Julia`.[^1] This potential for speedup is the reason that some of `lme4`'s contributors switched to working on `MixedModels.jl`, despite `Julia` having a much smaller user-base than `R`.
 
 [^1]: The main reason that a `Julia` package can be much faster than an `R` package is that `R` is _interpreted_ whereas `Julia` is _compiled_. Broadly speaking, an interpreted language takes the code you write and does a fast but suboptimal translation to low-level machine instructions every time you run the code, while a compiled language takes a block of code and carefully optimizes it to very fast machine code. This optimization takes some time, which means that running code just once is often slower in a compiled language. The optimized code is stored however, so that when you run a block of code multiple times the speedup can be significant. Since fitting a mixed-effects model generally involves running a block of model fitting code hundreds or thousands of times, switching to a compiled language like `Julia` comes with a big speed advantage.
 
-Because `MixedModels.jl` is still undergoing active development, you can expect new features to be added over time. Actively developed projects sometimes break backward compatibility by e.g. removing features, but `MixedModels.jl` uses semantic versioning, meaning that if large, breaking changes are introduced, the developers will change the major version number (e.g. if they are currently at v1.4.2, a breaking change means they will go to v2.0.0) making it easy to see these changes coming and revert to a compatible version, if necessary.
+Because `MixedModels.jl` is still undergoing active development, you can expect new features to be added over time. Actively developed projects sometimes break backward compatibility by e.g. removing features, but `MixedModels.jl` uses semantic versioning, meaning that if large, breaking changes are introduced, the developers will change the major version number (e.g. if they are currently at v4.8.0, a major breaking change means they will go to v5.0.0) making it easy to see these changes coming and revert to a compatible version, if necessary.
 
 That said, `MixedModels.jl` is not an experimental package; several companies use it commercially, so reliability is important and the developers are thoughtful about making changes.
 
@@ -180,7 +180,7 @@ toc()
 
 ```
 
-This model fit took even less time than the previous `MixedModels.jl` call, because the `Julia` JIT compiler had already compiled this model during this session and is smart enough to not recompile it when we call it again. The time consumed here is therefore almost purely model fitting time, and that turns out to be just ~7 seconds in `MixedModels.jl`. That reduces the time cost of 1000 refits for bootstrapping to 7000 seconds, or just 2 hours, rather than 30 hours when using `lme4`.
+This model fit took even less time than the previous `MixedModels.jl` call, because the `Julia` JIT compiler had already compiled this model during this session and is smart enough to not recompile it when we call it again. The time consumed here is therefore almost purely model fitting time, and that turns out to be less than ten seconds in `MixedModels.jl`. That reduces the time cost of 1000 refits for bootstrapping to just two hours, rather than 30 hours when using `lme4`.
 
 If you want to fit your own models in `MixedModels.jl` using `JuliaCall`, you can simply:
 
@@ -211,7 +211,7 @@ toc()
 
 ```
 
-This took just under three minutes for a very simple model. Doing the same in `Julia` will be much faster, but it works a little differently:
+This took more than two minutes for a very simple model. Doing the same in `Julia` will be much faster, but it works a little differently:
 
 ```{r julia_bootstrap}
 
@@ -236,7 +236,7 @@ toc()
 
 ```
 
-This only took 7 seconds, much faster than the `R` implementation. As a little perk, the returned dataframe is formatted more nicely than the output we got from `confint()`. This is not a very user-friendly process if you are used to `R` syntax, however, so let's wrap this in a function that we can call in one step:
+This only took about ten seconds, much faster than the `R` implementation. As a little perk, the returned dataframe is formatted more nicely than the output we got from `confint()`. This is not a very user-friendly process if you are used to `R` syntax, however, so let's wrap this in a function that we can call in one step:
 
 ```{r jboot_function}
 
@@ -263,9 +263,12 @@ toc()
 
 ```
 
-The function is marginally slower than the previous bootstrap we did in `Julia`, because we include the fitting of the original model in the function block (and therefore it's captured by the timing function, as well) but this is still more than an order of magnitude faster than computing CIs in `R`!
+This is more than an order of magnitude faster than computing CIs in `R`, pretty good for essentially no additional work beyond installing `Julia`.
 
 If you want to compute bootstrap CIs yourself, you can just fit a mixed-effects model using `lme4` (or using `jmer()`!) and then pass it to this function.
 
-
+This ends the tutorial. (For now; I may still add generalized linear models at some point.)  
 If you run into any issues, just shoot me an email at [vanparidon@wisc.edu](mailto:vanparidon@wisc.edu)!
+
+### Acknowledgements
+This tutorial leans heavily on the work of Phillip Alday and Douglas Bates. If you plan to publish work that uses `MixedModels.jl`, please cite it using the DOI (10.5281/zenodo.596435).

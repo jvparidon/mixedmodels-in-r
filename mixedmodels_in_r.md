@@ -13,7 +13,7 @@ library(tictoc)
 ## Why fit mixed-effects models with `MixedModels.jl` instead of `lme4`?
 
 `lme4` has lots of great qualities: It’s free and easy to install, it’s
-fairly straightforward to use if you know R, and its syntax and
+fairly straightforward to use if you know `R`, and its syntax and
 functionality is stable (i.e. it’s no longer undergoing any major
 changes). That last quality has downsides, too: Because `lme4` is no
 longer being actively developed, any new work done on it consists of bug
@@ -38,9 +38,9 @@ expect new features to be added over time. Actively developed projects
 sometimes break backward compatibility by e.g. removing features, but
 `MixedModels.jl` uses semantic versioning, meaning that if large,
 breaking changes are introduced, the developers will change the major
-version number (e.g. if they are currently at v1.4.2, a breaking change
-means they will go to v2.0.0) making it easy to see these changes coming
-and revert to a compatible version, if necessary.
+version number (e.g. if they are currently at v4.8.0, a major breaking
+change means they will go to v5.0.0) making it easy to see these changes
+coming and revert to a compatible version, if necessary.
 
 That said, `MixedModels.jl` is not an experimental package; several
 companies use it commercially, so reliability is important and the
@@ -111,10 +111,14 @@ not be on your `PATH` variable. If you encounter any problems, please
 refer back to the installation instructions.
 
 ``` r
-# install MixedModels.jl and JelyMe4.jl if necessary
-julia_install_package_if_needed("MixedModels")
-julia_install_package_if_needed("JellyMe4")
-julia_install_package_if_needed("DataFrames")
+# install Julia packages if necessary
+# these lines are commented out; uncomment them if you need to!
+#julia_install_package_if_needed("RCall")
+#julia_install_package_if_needed("MixedModels")
+#julia_install_package_if_needed("JellyMe4")
+#julia_install_package_if_needed("DataFrames")
+#julia_install_package_if_needed("Random")
+
 
 # load Julia packages
 julia_library("RCall")
@@ -130,6 +134,10 @@ julia_library("JellyMe4")
 
 ``` r
 julia_library("DataFrames")
+```
+
+``` r
+julia_library("Random")
 ```
 
 ``` r
@@ -162,6 +170,7 @@ session. How to do this will be demonstrated later in this vignette.
 
 ``` r
 tic("lme4 model")
+
 m <- lmer(rt_trunc ~ 1 + spkr * prec * load +
             (1 + spkr * prec * load | subj) +
             (1 + spkr * prec * load | item),
@@ -169,12 +178,6 @@ m <- lmer(rt_trunc ~ 1 + spkr * prec * load +
 ```
 
     ## boundary (singular) fit: see help('isSingular')
-
-``` r
-toc()
-```
-
-    ## lme4 model: 114.557 sec elapsed
 
 ``` r
 summary(m)
@@ -254,6 +257,12 @@ summary(m)
     ## optimizer (nloptwrap) convergence code: 0 (OK)
     ## boundary (singular) fit: see help('isSingular')
 
+``` r
+toc()
+```
+
+    ## lme4 model: 108.411 sec elapsed
+
 This model takes a bit of time to fit in `R`, around two minutes on my
 MacBook. Two minutes is generally not prohibitive when fitting a single
 model, but imagine a model with more parameters still, or fitting a
@@ -291,18 +300,15 @@ string is built up as follows:
 # but in case you want to use data from an R dataframe, this is how to get it
 julia_assign("kb07", kb07)
 
-# specify and fit the model in Julia using MixedModels.jl
+
 tic("MixedModels.jl model")
+
+# specify and fit the model in Julia using MixedModels.jl
 julia_command("jm = fit!(LinearMixedModel(@formula(
   rt_trunc ~ 1 + spkr * prec * load +
     (1 + spkr * prec * load | subj) +
     (1 + spkr * prec * load | item)), kb07), REML=false, progress=false);")
-toc()
-```
 
-    ## MixedModels.jl model: 14.69 sec elapsed
-
-``` r
 # retrieve the model from Julia
 jm <- julia_eval("robject(:lmerMod, Tuple([jm, kb07]));", need_return = "R")
 summary(jm)
@@ -391,6 +397,12 @@ summary(jm)
     ## optimizer (LN_BOBYQA) convergence code: 5 (fit with MixedModels.jl)
     ## boundary (singular) fit: see help('isSingular')
 
+``` r
+toc()
+```
+
+    ## MixedModels.jl model: 13.789 sec elapsed
+
 The fitted model is retrieved from the `JuliaCall` session using
 `julia_eval()`, and thanks to some magic from the `JellyMe4.jl` package,
 it is stored in `R` as an `lme4`-style model object. We can then simply
@@ -416,20 +428,17 @@ jmer <- function(formula, data, REML = TRUE, progress = TRUE) {
       "jmermod = fit!(LinearMixedModel(@formula(%s), jmerdat), REML=%s, progress=%s);",
       jf, jreml, jprog
     ))
-    julia_eval("robject(:lmerMod, Tuple([jmermod, jmerdat]));", need_return = "R")
+    return(julia_eval("robject(:lmerMod, Tuple([jmermod, jmerdat]));",
+                      need_return = "R"))
 }
 
+
 tic("jmer model")
+
 jm <- jmer(rt_trunc ~ 1 + spkr * prec * load +
              (1 + spkr * prec * load | subj) +
              (1 + spkr * prec * load | item),
             kb07, REML = FALSE, progress = FALSE)
-toc()
-```
-
-    ## jmer model: 7.208 sec elapsed
-
-``` r
 summary(jm)
 ```
 
@@ -516,14 +525,19 @@ summary(jm)
     ## optimizer (LN_BOBYQA) convergence code: 5 (fit with MixedModels.jl)
     ## boundary (singular) fit: see help('isSingular')
 
+``` r
+toc()
+```
+
+    ## jmer model: 5.731 sec elapsed
+
 This model fit took even less time than the previous `MixedModels.jl`
 call, because the `Julia` JIT compiler had already compiled this model
 during this session and is smart enough to not recompile it when we call
 it again. The time consumed here is therefore almost purely model
-fitting time, and that turns out to be just \~7 seconds in
+fitting time, and that turns out to be less than ten seconds in
 `MixedModels.jl`. That reduces the time cost of 1000 refits for
-bootstrapping to 7000 seconds, or just 2 hours, rather than 30 hours
-when using `lme4`.
+bootstrapping to just two hours, rather than 30 hours when using `lme4`.
 
 If you want to fit your own models in `MixedModels.jl` using
 `JuliaCall`, you can simply:
@@ -536,8 +550,166 @@ If you want to fit your own models in `MixedModels.jl` using
 4.  Store the returned results in an `R` variable so you can e.g. call
     `summary()` on it
 
+## Bootstrapping to get CIs
+
+To get CIs through bootstrapping, we have to refit the model hundreds or
+thousands of times. The speed advantage we get with `MixedModels.jl`
+makes this more convenient, but the bootstrapping functionality is a
+little bit different than in `lme4`, so we’ll walk through an example
+and create another function for convenience.
+
+As a bootstrapping example, we’ll use a fairly minimal model so that
+fitting doesn’t take forever. This model will be overly simplistic for
+the data, but we’re only using it as a demonstration. First, we fit a
+model in `lme4` and perform 10,000 bootstrap resamples.
+
+``` r
+m <- lmer(rt_trunc ~ 1 + spkr + prec + load +
+             (1 | subj) +
+             (1 | item),
+            kb07, REML = FALSE)
+
+
+tic("bootstrapping lme4 model")
+
+confint(m, method = "boot", nsim = 10000)
+```
+
+    ## Computing bootstrap confidence intervals ...
+
+    ## 
+    ## 7 warning(s): Model failed to converge with max|grad| = 0.00214342 (tol = 0.002, component 1) (and others)
+
+    ##                   2.5 %    97.5 %
+    ## .sig01        248.09042  384.5538
+    ## .sig02        262.61916  454.4578
+    ## .sigma        696.88527  745.1947
+    ## (Intercept)  2207.23064 2531.5589
+    ## spkrold        71.32804  202.5896
+    ## precmaintain -732.56310 -600.9244
+    ## loadyes        89.83415  224.3116
+
+``` r
+toc()
+```
+
+    ## bootstrapping lme4 model: 134.613 sec elapsed
+
+This took more than two minutes for a very simple model. Doing the same
+in `Julia` will be much faster, but it works a little differently:
+
+``` r
+# first we define the model using our jmer() function
+# so that a jmermod object will be quietly created in the JuliaCall session
+jmer(rt_trunc ~ 1 + spkr + prec + load +
+             (1 | subj) +
+             (1 | item),
+            kb07, REML = FALSE, progress = FALSE)
+```
+
+    ## Linear mixed model fit by maximum likelihood  ['lmerMod']
+    ## Formula: rt_trunc ~ 1 + spkr + prec + load + (1 | subj) + (1 | item)
+    ##    Data: jellyme4_data
+    ##       AIC       BIC    logLik  deviance  df.resid 
+    ##  28837.14  28875.56 -14411.57  28823.14      1782 
+    ## Random effects:
+    ##  Groups   Name        Std.Dev.
+    ##  subj     (Intercept) 318.6   
+    ##  item     (Intercept) 363.8   
+    ##  Residual             721.9   
+    ## Number of obs: 1789, groups:  subj, 56; item, 32
+    ## Fixed Effects:
+    ##  (Intercept)       spkrold  precmaintain       loadyes  
+    ##       2369.2         136.2        -667.2         156.7  
+    ## optimizer (LN_BOBYQA) convergence code: 5 (fit with MixedModels.jl) ; 0 optimizer warnings; 0 lme4 warnings
+
+``` r
+tic("bootstrapping MixedModels.jl model")
+
+# using model "jmermod", draw 10,000 bootstrap samples
+# randomly sampled using a MersenneTwister random number generator
+julia_command("samp = parametricbootstrap(MersenneTwister(9), 10_000, jmermod, use_threads=true);")
+
+# compute the 95% coverage interval from the samples and return a dataframe
+julia_eval("DataFrame(shortestcovint(samp, .95))")
+```
+
+    ##   type    group          names      lower     upper
+    ## 1    β     <NA>    (Intercept) 2206.36345 2532.5691
+    ## 2    β     <NA>      spkr: old   70.89937  203.6071
+    ## 3    β     <NA> prec: maintain -734.80710 -601.1132
+    ## 4    β     <NA>      load: yes   94.05696  227.1376
+    ## 5    σ     subj    (Intercept)  249.09570  386.6819
+    ## 6    σ     item    (Intercept)  263.37240  453.0225
+    ## 7    σ residual           <NA>  696.95321  745.7549
+
+``` r
+toc()
+```
+
+    ## bootstrapping MixedModels.jl model: 10.26 sec elapsed
+
+This only took about ten seconds, much faster than the `R`
+implementation. As a little perk, the returned dataframe is formatted
+more nicely than the output we got from `confint()`. This is not a very
+user-friendly process if you are used to `R` syntax, however, so let’s
+wrap this in a function that we can call in one step:
+
+``` r
+jboot <- function(model, data, n, coverage = .95, REML = FALSE,
+                  use_threads = TRUE, seed = 9) {
+    jf <- deparse1(formula(model))
+    jreml = ifelse(REML, "true", "false")
+    jthreads = ifelse(use_threads, "true", "false")
+    julia_assign("jmerdata", data)
+    julia_command(sprintf(
+      "jmermod = fit!(LinearMixedModel(@formula(%s), jmerdata), REML=%s, progress=false);",
+      jf, jreml
+    ))
+    return(julia_eval(sprintf(
+      "DataFrame(shortestcovint(parametricbootstrap(MersenneTwister(%s), %s, jmermod, use_threads=%s), %s))",
+      seed, n, jthreads, coverage
+    ), need_return = "R"))
+}
+
+# call the function on our lme4 model "m", with dataset "kb07"
+tic("test jboot function")
+jboot(m, kb07, 10000)
+```
+
+    ##   type    group          names      lower     upper
+    ## 1    β     <NA>    (Intercept) 2206.36345 2532.5691
+    ## 2    β     <NA>      spkr: old   70.89937  203.6071
+    ## 3    β     <NA> prec: maintain -734.80710 -601.1132
+    ## 4    β     <NA>      load: yes   94.05696  227.1376
+    ## 5    σ     subj    (Intercept)  249.09570  386.6819
+    ## 6    σ     item    (Intercept)  263.37240  453.0225
+    ## 7    σ residual           <NA>  696.95321  745.7549
+
+``` r
+toc()
+```
+
+    ## test jboot function: 6.297 sec elapsed
+
+This is more than an order of magnitude faster than computing CIs in
+`R`, pretty good for essentially no additional work beyond installing
+`Julia`.
+
+If you want to compute bootstrap CIs yourself, you can just fit a
+mixed-effects model using `lme4` (or using `jmer()`!) and then pass it
+to this function.
+
+This ends the tutorial. (For now; I may still add generalized linear
+models at some point.)  
 If you run into any issues, just shoot me an email at
 <vanparidon@wisc.edu>!
+
+### Acknowledgements
+
+This tutorial leans heavily on the work of Phillip Alday and Douglas
+Bates. If you plan to publish work that uses `MixedModels.jl`, please
+cite it using the DOI (10.5281/zenodo.596435).
 
 [^1]: The main reason that a `Julia` package can be much faster than an
     `R` package is that `R` is *interpreted* whereas `Julia` is
