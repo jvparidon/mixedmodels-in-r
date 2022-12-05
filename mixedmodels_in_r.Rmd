@@ -60,16 +60,21 @@ If you do not see similar output when you call `julia_setup()`, something might 
 
 ```{r julia_packages}
 
-# install MixedModels.jl and JelyMe4.jl if necessary
-julia_install_package_if_needed("MixedModels")
-julia_install_package_if_needed("JellyMe4")
-julia_install_package_if_needed("DataFrames")
+# install Julia packages if necessary
+# these lines are commented out; uncomment them if you need to!
+#julia_install_package_if_needed("RCall")
+#julia_install_package_if_needed("MixedModels")
+#julia_install_package_if_needed("JellyMe4")
+#julia_install_package_if_needed("DataFrames")
+#julia_install_package_if_needed("Random")
+
 
 # load Julia packages
 julia_library("RCall")
 julia_library("MixedModels")
 julia_library("JellyMe4")
 julia_library("DataFrames")
+julia_library("Random")
 
 # load an example dataset from MixedModels.jl into R
 julia_command("kb07 = DataFrame(MixedModels.dataset(:kb07));")
@@ -90,13 +95,14 @@ We've already loaded the data from the `Julia` session into the `R` session in t
 ```{r lme4_model}
 
 tic("lme4 model")
+
 m <- lmer(rt_trunc ~ 1 + spkr * prec * load +
             (1 + spkr * prec * load | subj) +
             (1 + spkr * prec * load | item),
           kb07, REML = FALSE)
-toc()
-
 summary(m)
+
+toc()
 
 ```
 
@@ -123,17 +129,20 @@ First, we pass the dataset from `R` to the `JuliaCall` session using `julia_assi
 # but in case you want to use data from an R dataframe, this is how to get it
 julia_assign("kb07", kb07)
 
-# specify and fit the model in Julia using MixedModels.jl
+
 tic("MixedModels.jl model")
+
+# specify and fit the model in Julia using MixedModels.jl
 julia_command("jm = fit!(LinearMixedModel(@formula(
   rt_trunc ~ 1 + spkr * prec * load +
     (1 + spkr * prec * load | subj) +
     (1 + spkr * prec * load | item)), kb07), REML=false, progress=false);")
-toc()
 
 # retrieve the model from Julia
 jm <- julia_eval("robject(:lmerMod, Tuple([jm, kb07]));", need_return = "R")
 summary(jm)
+
+toc()
 
 ```
 
@@ -154,17 +163,20 @@ jmer <- function(formula, data, REML = TRUE, progress = TRUE) {
       "jmermod = fit!(LinearMixedModel(@formula(%s), jmerdat), REML=%s, progress=%s);",
       jf, jreml, jprog
     ))
-    julia_eval("robject(:lmerMod, Tuple([jmermod, jmerdat]));", need_return = "R")
+    return(julia_eval("robject(:lmerMod, Tuple([jmermod, jmerdat]));",
+                      need_return = "R"))
 }
 
+
 tic("jmer model")
+
 jm <- jmer(rt_trunc ~ 1 + spkr * prec * load +
              (1 + spkr * prec * load | subj) +
              (1 + spkr * prec * load | item),
             kb07, REML = FALSE, progress = FALSE)
-toc()
-
 summary(jm)
+
+toc()
 
 ```
 
@@ -176,5 +188,84 @@ If you want to fit your own models in `MixedModels.jl` using `JuliaCall`, you ca
 2. Assign your dataset from your `R` session to your `JuliaCall` session using `julia_assign()`
 3. Specify and fit the model using `jmer()` instead of `lmer()`
 4. Store the returned results in an `R` variable so you can e.g. call `summary()` on it
+
+## Bootstrapping to get CIs
+
+To get CIs through bootstrapping, we have to refit the model hundreds or thousands of times. The speed advantage we get with `MixedModels.jl` makes this more convenient, but the bootstrapping functionality is a little bit different than in `lme4`, so we'll walk through an example and create another function for convenience.
+
+As a bootstrapping example, we'll use a fairly minimal model so that fitting doesn't take forever. This model will be overly simplistic for the data, but we're only using it as a demonstration. First, we fit a model in `lme4` and perform 10,000 bootstrap resamples.
+
+```{r lme4_bootstrap}
+
+m <- lmer(rt_trunc ~ 1 + spkr + prec + load +
+             (1 | subj) +
+             (1 | item),
+            kb07, REML = FALSE)
+
+
+tic("bootstrapping lme4 model")
+
+confint(m, method = "boot", nsim = 10000)
+
+toc()
+
+```
+
+This took just under three minutes for a very simple model. Doing the same in `Julia` will be much faster, but it works a little differently:
+
+```{r julia_bootstrap}
+
+# first we define the model using our jmer() function
+# so that a jmermod object will be quietly created in the JuliaCall session
+jmer(rt_trunc ~ 1 + spkr + prec + load +
+             (1 | subj) +
+             (1 | item),
+            kb07, REML = FALSE, progress = FALSE)
+
+
+tic("bootstrapping MixedModels.jl model")
+
+# using model "jmermod", draw 10,000 bootstrap samples
+# randomly sampled using a MersenneTwister random number generator
+julia_command("samp = parametricbootstrap(MersenneTwister(9), 10_000, jmermod, use_threads=true);")
+
+# compute the 95% coverage interval from the samples and return a dataframe
+julia_eval("DataFrame(shortestcovint(samp, .95))")
+
+toc()
+
+```
+
+This only took 7 seconds, much faster than the `R` implementation. As a little perk, the returned dataframe is formatted more nicely than the output we got from `confint()`. This is not a very user-friendly process if you are used to `R` syntax, however, so let's wrap this in a function that we can call in one step:
+
+```{r jboot_function}
+
+jboot <- function(model, data, n, coverage = .95, REML = FALSE,
+                  use_threads = TRUE, seed = 9) {
+    jf <- deparse1(formula(model))
+    jreml = ifelse(REML, "true", "false")
+    jthreads = ifelse(use_threads, "true", "false")
+    julia_assign("jmerdata", data)
+    julia_command(sprintf(
+      "jmermod = fit!(LinearMixedModel(@formula(%s), jmerdata), REML=%s, progress=false);",
+      jf, jreml
+    ))
+    return(julia_eval(sprintf(
+      "DataFrame(shortestcovint(parametricbootstrap(MersenneTwister(%s), %s, jmermod, use_threads=%s), %s))",
+      seed, n, jthreads, coverage
+    ), need_return = "R"))
+}
+
+# call the function on our lme4 model "m", with dataset "kb07"
+tic("test jboot function")
+jboot(m, kb07, 10000)
+toc()
+
+```
+
+The function is marginally slower than the previous bootstrap we did in `Julia`, because we include the fitting of the original model in the function block (and therefore it's captured by the timing function, as well) but this is still more than an order of magnitude faster than computing CIs in `R`!
+
+If you want to compute bootstrap CIs yourself, you can just fit a mixed-effects model using `lme4` (or using `jmer()`!) and then pass it to this function.
+
 
 If you run into any issues, just shoot me an email at [vanparidon@wisc.edu](mailto:vanparidon@wisc.edu)!
